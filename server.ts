@@ -5,7 +5,7 @@ import { Collection, MongoClient, ObjectId, ServerApiVersion } from "mongodb";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import bcryptjs from "bcryptjs";
 
-dotenv.config();
+dotenv.config({ path: process.env.VERCEL === "1" ? ".env.production" : ".env" });
 
 const uri = process.env.MONGODB_URI || "";
 const maskedUri = uri ? uri.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@") : "<not configured>";
