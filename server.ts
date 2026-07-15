@@ -91,6 +91,11 @@ let dbReady = false;
 
 const isDatabaseReady = () => Boolean(dbReady && usersCollection && communityIdeasCollection && commentsCollection);
 
+const databaseStatus = () => {
+  if (isDatabaseReady()) return "connected";
+  return uri ? "connection_failed" : "not_configured";
+};
+
 const ensureCollections = () => {
   if (!isDatabaseReady()) {
     throw new Error("Database unavailable");
@@ -346,6 +351,17 @@ const verifyToken = async (req: AuthRequest, res: Response, next: NextFunction) 
 async function run() {
   try {
     await initializeDatabase();
+
+    app.use((req, res, next) => {
+      if (isDatabaseReady() || req.path === "/healthz" || req.path === "/") {
+        next();
+        return;
+      }
+
+      res.status(503).json({
+        message: "Database is unavailable. Check the server deployment configuration and MongoDB network access.",
+      });
+    });
 
     app.post("/auth/register", async (req: AuthRequest<{ name?: string; email?: string; password?: string; image?: string }>, res) => {
       try {
@@ -979,6 +995,7 @@ app.get("/healthz", (req, res) => {
   res.json({
     status: "ok",
     databaseReady: isDatabaseReady(),
+    databaseStatus: databaseStatus(),
     runtime: process.env.VERCEL === "1" ? "vercel" : "local",
   });
 });
