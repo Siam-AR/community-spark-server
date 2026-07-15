@@ -88,12 +88,23 @@ let usersCollection: Collection<UserDocument> | undefined;
 let communityIdeasCollection: Collection<IdeaDocument> | undefined;
 let commentsCollection: Collection<CommentDocument> | undefined;
 let dbReady = false;
+let databaseFailureReason: "authentication_failed" | "connection_timeout" | "dns_error" | "network_access_denied" | "unknown" | undefined;
 
 const isDatabaseReady = () => Boolean(dbReady && usersCollection && communityIdeasCollection && commentsCollection);
 
 const databaseStatus = () => {
   if (isDatabaseReady()) return "connected";
   return uri ? "connection_failed" : "not_configured";
+};
+
+const classifyDatabaseFailure = (error: unknown): NonNullable<typeof databaseFailureReason> => {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+
+  if (message.includes("authentication failed") || message.includes("auth failed")) return "authentication_failed";
+  if (message.includes("querysrv enotfound") || message.includes("enotfound")) return "dns_error";
+  if (message.includes("ip") && (message.includes("access") || message.includes("whitelist"))) return "network_access_denied";
+  if (message.includes("timed out") || message.includes("timeout")) return "connection_timeout";
+  return "unknown";
 };
 
 const ensureCollections = () => {
@@ -260,6 +271,7 @@ async function initializeDatabase() {
     dbReady = true;
     console.log(`Using MongoDB database: ${DB_NAME}`);
   } catch (error) {
+    databaseFailureReason = classifyDatabaseFailure(error);
     console.error("[startup] initializeDatabase() failed:", error);
     if (error instanceof Error) {
       console.error(error.stack);
@@ -996,6 +1008,7 @@ app.get("/healthz", (req, res) => {
     status: "ok",
     databaseReady: isDatabaseReady(),
     databaseStatus: databaseStatus(),
+    ...(databaseFailureReason ? { databaseFailureReason } : {}),
     runtime: process.env.VERCEL === "1" ? "vercel" : "local",
   });
 });
