@@ -97,3 +97,35 @@ interface CommentDocument {
   createdAt: Date;
   updatedAt: Date;
 }
+
+
+const verifyToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  const token = authHeader.split(" ")[1];
+  if (!token) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as AuthUserPayload;
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+};
+
+async function run() {
+  try {
+    // await client.connect();
+
+    const db = client.db(DB_NAME);
+    const usersCollection = db.collection<UserDocument>("users");
+    const communityIdeasCollection = db.collection<IdeaDocument>("community-ideas");
+    const commentsCollection = db.collection<CommentDocument>("comments");
+    console.log(`Using MongoDB database: ${DB_NAME}`);
