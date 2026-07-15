@@ -5,7 +5,6 @@ import { MongoClient, ObjectId, ServerApiVersion } from "mongodb";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import bcryptjs from "bcryptjs";
 
-// ===================== COMMIT 1: chore(server): bootstrap express, env, cors, mongo client setup =====================
 dotenv.config();
 
 const uri = process.env.MONGODB_URI;
@@ -98,7 +97,6 @@ interface CommentDocument {
   updatedAt: Date;
 }
 
-
 const verifyToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
 
@@ -130,10 +128,6 @@ async function run() {
     const commentsCollection = db.collection<CommentDocument>("comments");
     console.log(`Using MongoDB database: ${DB_NAME}`);
 
-
-    
-
-    
     app.post("/auth/register", async (req: AuthRequest<{ name?: string; email?: string; password?: string; image?: string }>, res) => {
       try {
         const { name, email, password, image } = req.body;
@@ -328,8 +322,6 @@ async function run() {
       }
     });
 
-    
-    
     app.get("/ideas/featured", async (req, res) => {
       try {
         const result = await communityIdeasCollection.find().limit(6).toArray();
@@ -550,3 +542,191 @@ async function run() {
         res.status(500).json({ message: "Error fetching user ideas" });
       }
     });
+
+    const normalizeObjectId = (value?: ObjectId | string | null): ObjectId | null => {
+      if (!value) return null;
+      if (typeof value === "string") {
+        return ObjectId.isValid(value) ? new ObjectId(value) : null;
+      }
+      return value;
+    };
+
+    const normalizeIdString = (value?: ObjectId | string | null): string | undefined => {
+      if (!value) return undefined;
+      return typeof value === "string" ? value : value.toString();
+    };
+
+    const buildCommentResponse = async (comment: CommentDocument) => {
+      const user = await usersCollection.findOne(
+        { _id: comment.userId },
+        { projection: { name: 1, image: 1, email: 1 } },
+      );
+
+      const ideaQueryId = normalizeObjectId(comment.ideaId);
+      const idea = ideaQueryId
+        ? await communityIdeasCollection.findOne(
+            { _id: ideaQueryId },
+            { projection: { title: 1, category: 1, userName: 1, userEmail: 1 } },
+          )
+        : null;
+
+      const ideaAuthorName = idea?.userName || idea?.userEmail || "Anonymous builder";
+
+      return {
+        _id: normalizeIdString(comment._id) || "",
+        ideaId: normalizeIdString(comment.ideaId),
+        userId: normalizeIdString(comment.userId),
+        text: comment.text,
+        createdAt: comment.createdAt?.toISOString(),
+        updatedAt: comment.updatedAt?.toISOString(),
+        userName: user?.name || "Anonymous",
+        userEmail: user?.email || "",
+        userImage: user?.image || "",
+        ideaTitle: idea?.title,
+        ideaCategory: idea?.category,
+        ideaAuthorName,
+        idea: idea
+          ? {
+              _id: normalizeIdString(idea._id) || "",
+              title: idea.title,
+              category: idea.category,
+              authorName: ideaAuthorName,
+            }
+          : undefined,
+      };
+    };
+
+    app.post("/comments", verifyToken, async (req: AuthRequest<{ ideaId?: string; text?: string }>, res) => {
+      try {
+        const { ideaId, text } = req.body;
+        if (!ideaId || !text || !String(text).trim()) {
+          return res.status(400).json({ message: "Missing required fields" });
+        }
+
+        const userId = req.user?.userId;
+        if (!userId) {
+          return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        const normalizedUserId = typeof userId === "string" ? userId : userId.toString();
+        const commentData: Omit<CommentDocument, "_id"> = {
+          ideaId: new ObjectId(ideaId),
+          userId: new ObjectId(normalizedUserId),
+          text: String(text).trim(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const result = await commentsCollection.insertOne(commentData as CommentDocument);
+        await communityIdeasCollection.updateOne({ _id: new ObjectId(ideaId) }, { $inc: { commentCount: 1 } });
+
+        const comment = await commentsCollection.findOne({ _id: result.insertedId });
+        if (!comment) {
+          return res.status(500).json({ message: "Comment creation failed" });
+        }
+
+        res.status(201).json(await buildCommentResponse(comment));
+      } catch (error) {
+        console.error("Error creating comment:", error);
+        res.status(500).json({ message: "Error creating comment" });
+      }
+    });
+
+    app.get("/comments/me", verifyToken, async (req: AuthRequest, res) => {
+      try {
+        const userId = req.user?.userId;
+        if (!userId) {
+          return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        const normalizedUserId = typeof userId === "string" ? userId : userId.toString();
+        const comments = await commentsCollection.find({ userId: new ObjectId(normalizedUserId) }).toArray();
+        const response = await Promise.all(comments.map(buildCommentResponse));
+        res.json(response);
+      } catch (error) {
+        console.error("Error fetching user comments:", error);
+        res.status(500).json({ message: "Error fetching user comments" });
+      }
+    });
+
+    app.get("/comments/:ideaId", async (req: Request<{ ideaId: string }>, res) => {
+      try {
+        const { ideaId } = req.params;
+        const comments = await commentsCollection.find({ ideaId: new ObjectId(ideaId) }).toArray();
+        const response = await Promise.all(comments.map(buildCommentResponse));
+        res.json(response);
+      } catch (error) {
+        console.error("Error fetching idea comments:", error);
+        res.status(500).json({ message: "Error fetching idea comments" });
+      }
+    });
+
+    app.delete("/comments/:commentId", verifyToken, async (req: AuthRequest<{ commentId: string }>, res) => {
+      try {
+        const { commentId } = req.params;
+        const comment = await commentsCollection.findOne({ _id: new ObjectId(commentId) });
+        if (!comment) {
+          return res.status(404).json({ message: "Comment not found" });
+        }
+
+        const userId = req.user?.userId;
+        const normalizedUserId = typeof userId === "string" ? userId : userId?.toString?.();
+        if (!normalizedUserId || comment.userId.toString() !== normalizedUserId) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+
+        await commentsCollection.deleteOne({ _id: comment._id });
+        res.json({ message: "Comment deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting comment:", error);
+        res.status(500).json({ message: "Error deleting comment" });
+      }
+    });
+
+    app.patch("/comments/:commentId", verifyToken, async (req: AuthRequest<{ commentId: string }, any, { text?: string }>, res) => {
+      try {
+        const { commentId } = req.params;
+        const { text } = req.body;
+
+        if (!text || !String(text).trim()) {
+          return res.status(400).json({ message: "Missing or invalid text" });
+        }
+
+        const comment = await commentsCollection.findOne({ _id: new ObjectId(commentId) });
+        if (!comment) {
+          return res.status(404).json({ message: "Comment not found" });
+        }
+
+        const userId = req.user?.userId;
+        const normalizedUserId = typeof userId === "string" ? userId : userId?.toString?.();
+        if (!normalizedUserId || comment.userId.toString() !== normalizedUserId) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+
+        await commentsCollection.updateOne({ _id: comment._id }, { $set: { text: String(text).trim(), updatedAt: new Date() } });
+        res.json({ message: "Comment updated successfully" });
+      } catch (error) {
+        console.error("Error updating comment:", error);
+        res.status(500).json({ message: "Error updating comment" });
+      }
+    });
+
+    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+  } finally {
+    // await client.close();
+  }
+}
+
+run().catch(console.dir);
+
+app.get("/", (req, res) => {
+  res.send("Server is running fine!");
+});
+
+if (process.env.VERCEL !== "1") {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+export default app;
