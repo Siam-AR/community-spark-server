@@ -11,7 +11,15 @@ const uri = process.env.MONGODB_URI || "";
 const maskedUri = uri ? uri.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@") : "<not configured>";
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
 const DB_NAME = (process.env.MONGODB_DB_NAME || "community-spark").trim();
-console.log(`MongoDB URI: ${maskedUri}`);
+console.log(`[startup] Vercel runtime: ${process.env.VERCEL === "1" ? "yes" : "no"}`);
+console.log(`[startup] MongoDB URI: ${maskedUri}`);
+console.log(`[startup] env check`, {
+  hasMongoUri: Boolean(uri),
+  hasMongoDbName: Boolean(process.env.MONGODB_DB_NAME),
+  hasJwtSecret: Boolean(process.env.JWT_SECRET),
+  hasClientUrl: Boolean(process.env.CLIENT_URL || process.env.CLIENT_URLS),
+  hasBetterAuthSecret: Boolean(process.env.BETTER_AUTH_SECRET),
+});
 const CLIENT_URLS = (process.env.CLIENT_URL || process.env.CLIENT_URLS || "")
   .split(",")
   .map((url) => url.trim())
@@ -42,7 +50,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.options(/(.*)/, cors(corsOptions));
 app.use(express.json());
 
 const client = new MongoClient(uri || "mongodb://127.0.0.1:27017", {
@@ -81,7 +89,10 @@ async function initializeDatabase() {
     dbReady = true;
     console.log(`Using MongoDB database: ${DB_NAME}`);
   } catch (error) {
-    console.error("MongoDB connection failed:", error);
+    console.error("[startup] initializeDatabase() failed:", error);
+    if (error instanceof Error) {
+      console.error(error.stack);
+    }
   }
 }
 
@@ -777,7 +788,12 @@ async function run() {
   }
 }
 
-run().catch(console.dir);
+run().catch((error) => {
+  console.error("[startup] run() failed:", error);
+  if (error instanceof Error) {
+    console.error(error.stack);
+  }
+});
 
 app.get("/", (req, res) => {
   res.send("Server is running fine!");
