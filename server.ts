@@ -66,12 +66,18 @@ let communityIdeasCollection: Collection<IdeaDocument> | undefined;
 let commentsCollection: Collection<CommentDocument> | undefined;
 let dbReady = false;
 
+const isDatabaseReady = () => Boolean(dbReady && usersCollection && communityIdeasCollection && commentsCollection);
+
 const ensureCollections = () => {
-  if (!dbReady || !usersCollection || !communityIdeasCollection || !commentsCollection) {
+  if (!isDatabaseReady()) {
     throw new Error("Database unavailable");
   }
 
-  return { usersCollection, communityIdeasCollection, commentsCollection };
+  return {
+    usersCollection: usersCollection!,
+    communityIdeasCollection: communityIdeasCollection!,
+    commentsCollection: commentsCollection!,
+  };
 };
 
 async function initializeDatabase() {
@@ -382,6 +388,10 @@ async function run() {
 
     app.get("/projects/featured", async (req, res) => {
       try {
+        if (!isDatabaseReady()) {
+          return res.json([]);
+        }
+
         const { communityIdeasCollection } = ensureCollections();
         const result = await communityIdeasCollection.find().limit(6).toArray();
         res.json(result);
@@ -393,6 +403,10 @@ async function run() {
 
     app.get("/projects", async (req, res) => {
       try {
+        if (!isDatabaseReady()) {
+          return res.json([]);
+        }
+
         const category = typeof req.query.category === "string" ? req.query.category : undefined;
         const search = typeof req.query.search === "string" ? req.query.search : undefined;
         const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined;
@@ -432,6 +446,10 @@ async function run() {
 
     app.get("/projects/:id", async (req: Request<{ id: string }>, res) => {
       try {
+        if (!isDatabaseReady()) {
+          return res.status(404).json({ message: "Idea not found" });
+        }
+
         const { id } = req.params;
         if (!ObjectId.isValid(id)) {
           return res.status(404).json({ message: "Idea not found" });
@@ -596,6 +614,10 @@ async function run() {
         const userId = req.user?.userId;
         if (!userId) {
           return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        if (!isDatabaseReady()) {
+          return res.json([]);
         }
 
         const normalizedUserId = typeof userId === "string" ? userId : userId.toString();
@@ -793,6 +815,14 @@ run().catch((error) => {
   if (error instanceof Error) {
     console.error(error.stack);
   }
+});
+
+app.get("/healthz", (req, res) => {
+  res.json({
+    status: "ok",
+    databaseReady: isDatabaseReady(),
+    runtime: process.env.VERCEL === "1" ? "vercel" : "local",
+  });
 });
 
 app.get("/", (req, res) => {
