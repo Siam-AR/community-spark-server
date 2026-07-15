@@ -80,7 +80,14 @@ app.use(cors(corsOptions));
 app.options(/(.*)/, cors(corsOptions));
 app.use(express.json());
 
+const DATABASE_CONNECT_TIMEOUT_MS = 8_000;
+const DATABASE_RETRY_COOLDOWN_MS = 30_000;
+
 const client = new MongoClient(uri || "mongodb://127.0.0.1:27017", {
+  // A serverless request should fail predictably when Atlas cannot be reached,
+  // rather than waiting for the driver's much longer default selection timeout.
+  serverSelectionTimeoutMS: DATABASE_CONNECT_TIMEOUT_MS,
+  connectTimeoutMS: DATABASE_CONNECT_TIMEOUT_MS,
   serverApi: {
     version: ServerApiVersion.v1,
     strict: true,
@@ -93,6 +100,8 @@ let communityIdeasCollection: Collection<IdeaDocument> | undefined;
 let commentsCollection: Collection<CommentDocument> | undefined;
 let dbReady = false;
 let databaseFailureReason: "authentication_failed" | "connection_timeout" | "dns_error" | "network_access_denied" | "unknown" | undefined;
+let databaseInitialization: Promise<void> | undefined;
+let lastDatabaseAttemptAt = 0;
 
 const isDatabaseReady = () => Boolean(dbReady && usersCollection && communityIdeasCollection && commentsCollection);
 
@@ -261,26 +270,43 @@ const fallbackProjects: Array<Omit<IdeaDocument, "_id" | "userId"> & { _id: stri
 ];
 
 async function initializeDatabase() {
+  if (isDatabaseReady()) {
+    return;
+  }
+
   if (!uri) {
     console.warn("MONGODB_URI is not configured. API routes will return 503 until it is set.");
     return;
   }
 
-  try {
-    await client.connect();
-    const db = client.db(DB_NAME);
-    usersCollection = db.collection<UserDocument>("users");
-    communityIdeasCollection = db.collection<IdeaDocument>("community-ideas");
-    commentsCollection = db.collection<CommentDocument>("comments");
-    dbReady = true;
-    console.log(`Using MongoDB database: ${DB_NAME}`);
-  } catch (error) {
-    databaseFailureReason = classifyDatabaseFailure(error);
-    console.error("[startup] initializeDatabase() failed:", error);
-    if (error instanceof Error) {
-      console.error(error.stack);
-    }
+  if (databaseInitialization) {
+    return databaseInitialization;
   }
+
+  lastDatabaseAttemptAt = Date.now();
+  databaseInitialization = (async () => {
+    try {
+      await client.connect();
+      const db = client.db(DB_NAME);
+      usersCollection = db.collection<UserDocument>("users");
+      communityIdeasCollection = db.collection<IdeaDocument>("community-ideas");
+      commentsCollection = db.collection<CommentDocument>("comments");
+      dbReady = true;
+      databaseFailureReason = undefined;
+      console.log(`Using MongoDB database: ${DB_NAME}`);
+    } catch (error) {
+      dbReady = false;
+      databaseFailureReason = classifyDatabaseFailure(error);
+      console.error("[startup] initializeDatabase() failed:", error);
+      if (error instanceof Error) {
+        console.error(error.stack);
+      }
+    } finally {
+      databaseInitialization = undefined;
+    }
+  })();
+
+  return databaseInitialization;
 }
 
 interface AuthUserPayload extends JwtPayload {
@@ -366,12 +392,21 @@ const verifyToken = async (req: AuthRequest, res: Response, next: NextFunction) 
 
 async function run() {
   try {
-    await initializeDatabase();
+    // Do not delay route registration on a network connection. On Vercel, an
+    // Atlas timeout during a cold start otherwise leaves the function without
+    // its routes until the timeout has elapsed.
+    void initializeDatabase();
 
     app.use((req, res, next) => {
       if (isDatabaseReady() || req.path === "/healthz" || req.path === "/") {
         next();
         return;
+      }
+
+      // A warm serverless instance can recover after Atlas network access is
+      // fixed without requiring another deployment or process restart.
+      if (!databaseInitialization && Date.now() - lastDatabaseAttemptAt >= DATABASE_RETRY_COOLDOWN_MS) {
+        void initializeDatabase();
       }
 
       res.status(503).json({
@@ -994,7 +1029,7 @@ async function run() {
       }
     });
 
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    console.log("API routes registered; MongoDB connection is initializing in the background.");
   } finally {
     // await client.close();
   }
