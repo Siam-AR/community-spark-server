@@ -11,6 +11,15 @@ const uri = process.env.MONGODB_URI || "";
 const maskedUri = uri ? uri.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@") : "<not configured>";
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
 const DB_NAME = (process.env.MONGODB_DB_NAME || "community-spark").trim();
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || (process.env.VERCEL === "1"
+  ? `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://community-spark-server.vercel.app"}/auth/google/callback`
+  : "http://localhost:5000/auth/google/callback");
+const FRONTEND_BASE_URL = (process.env.CLIENT_URL || process.env.CLIENT_URLS || "https://community-spark-client.vercel.app")
+  .split(",")
+  .map((url) => url.trim())
+  .filter(Boolean)[0] || "https://community-spark-client.vercel.app";
 console.log(`[startup] Vercel runtime: ${process.env.VERCEL === "1" ? "yes" : "no"}`);
 console.log(`[startup] MongoDB URI: ${maskedUri}`);
 console.log(`[startup] env check`, {
@@ -78,6 +87,68 @@ const ensureCollections = () => {
     communityIdeasCollection: communityIdeasCollection!,
     commentsCollection: commentsCollection!,
   };
+};
+
+const fallbackUsers: UserDocument[] = [];
+
+const findUserByEmail = async (email: string) => {
+  if (isDatabaseReady()) {
+    const { usersCollection } = ensureCollections();
+    return usersCollection.findOne({ email });
+  }
+
+  return fallbackUsers.find((user) => user.email === email);
+};
+
+const findUserById = async (id: string | ObjectId) => {
+  const normalizedId = typeof id === "string" ? new ObjectId(id) : id;
+
+  if (isDatabaseReady()) {
+    const { usersCollection } = ensureCollections();
+    return usersCollection.findOne({ _id: normalizedId });
+  }
+
+  return fallbackUsers.find((user) => user._id.toString() === normalizedId.toString());
+};
+
+const createUser = async (userData: Omit<UserDocument, "_id">) => {
+  if (isDatabaseReady()) {
+    const { usersCollection } = ensureCollections();
+    const result = await usersCollection.insertOne(userData as UserDocument);
+    return { ...userData, _id: result.insertedId } as UserDocument;
+  }
+
+  const user = { ...userData, _id: new ObjectId() } as UserDocument;
+  fallbackUsers.push(user);
+  return user;
+};
+
+const updateUser = async (id: string | ObjectId, updateData: Partial<UserDocument>) => {
+  const normalizedId = typeof id === "string" ? new ObjectId(id) : id;
+
+  if (isDatabaseReady()) {
+    const { usersCollection } = ensureCollections();
+    const result = await usersCollection.updateOne({ _id: normalizedId }, { $set: updateData });
+    if (result.matchedCount === 0) {
+      return null;
+    }
+
+    const updatedUser = await usersCollection.findOne({ _id: normalizedId });
+    return updatedUser ?? null;
+  }
+
+  const existingUser = fallbackUsers.find((user) => user._id.toString() === normalizedId.toString());
+  if (!existingUser) {
+    return null;
+  }
+
+  const updatedUser = { ...existingUser, ...updateData, updatedAt: new Date() } as UserDocument;
+  const index = fallbackUsers.findIndex((user) => user._id.toString() === normalizedId.toString());
+  if (index >= 0) {
+    fallbackUsers[index] = updatedUser;
+  }
+
+  return updatedUser;
 };
 
 const fallbackProjects: Array<Omit<IdeaDocument, "_id" | "userId"> & { _id: string; userId: string }> = [
@@ -282,8 +353,7 @@ async function run() {
           return res.status(400).json({ message: "Password must contain at least one lowercase letter" });
         }
 
-        const { usersCollection } = ensureCollections();
-        const existingUser = await usersCollection.findOne({ email });
+        const existingUser = await findUserByEmail(email);
         if (existingUser) {
           return res.status(409).json({ message: "User already exists" });
         }
@@ -298,15 +368,15 @@ async function run() {
           updatedAt: new Date(),
         };
 
-        const result = await usersCollection.insertOne(newUser as UserDocument);
+        const createdUser = await createUser(newUser);
 
-        const token = jwt.sign({ userId: result.insertedId, email, name }, JWT_SECRET, { expiresIn: "7d" });
+        const token = jwt.sign({ userId: createdUser._id, email, name }, JWT_SECRET, { expiresIn: "7d" });
 
         res.status(201).json({
           message: "User registered successfully",
           token,
           user: {
-            id: result.insertedId,
+            id: createdUser._id,
             name,
             email,
             image: image || "",
@@ -326,8 +396,7 @@ async function run() {
           return res.status(400).json({ message: "Missing email or password" });
         }
 
-        const { usersCollection } = ensureCollections();
-        const user = await usersCollection.findOne({ email });
+        const user = await findUserByEmail(email);
         if (!user) {
           return res.status(401).json({ message: "Invalid credentials" });
         }
@@ -363,8 +432,7 @@ async function run() {
           return res.status(400).json({ message: "Missing required fields" });
         }
 
-        const { usersCollection } = ensureCollections();
-        let user = await usersCollection.findOne({ email });
+        let user = await findUserByEmail(email);
 
         if (!user) {
           const newUser: Omit<UserDocument, "_id"> = {
@@ -378,10 +446,9 @@ async function run() {
             updatedAt: new Date(),
           };
 
-          const result = await usersCollection.insertOne(newUser as UserDocument);
-          user = { ...newUser, _id: result.insertedId };
+          user = await createUser(newUser);
         } else if (!user.googleId && !user.password) {
-          await usersCollection.updateOne({ _id: user._id }, { $set: { googleId: googleId || "", authMethod: "google" } });
+          user = (await updateUser(user._id, { googleId: googleId || "", authMethod: "google" })) || user;
         }
 
         const token = jwt.sign({ userId: user._id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: "7d" });
@@ -410,8 +477,7 @@ async function run() {
         }
 
         const id = typeof userId === "string" ? userId : userId.toString();
-        const { usersCollection } = ensureCollections();
-        const user = await usersCollection.findOne({ _id: new ObjectId(id) });
+        const user = await findUserById(id);
 
         if (!user) {
           return res.status(404).json({ message: "User not found" });
@@ -447,10 +513,9 @@ async function run() {
         if (image) updateData.image = image;
         updateData.updatedAt = new Date();
 
-        const { usersCollection } = ensureCollections();
-        const result = await usersCollection.updateOne({ _id: new ObjectId(id) }, { $set: updateData });
+        const result = await updateUser(id, updateData);
 
-        if (result.matchedCount === 0) {
+        if (!result) {
           return res.status(404).json({ message: "User not found" });
         }
 

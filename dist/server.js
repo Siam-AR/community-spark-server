@@ -60,12 +60,91 @@ let usersCollection;
 let communityIdeasCollection;
 let commentsCollection;
 let dbReady = false;
+const isDatabaseReady = () => Boolean(dbReady && usersCollection && communityIdeasCollection && commentsCollection);
 const ensureCollections = () => {
-    if (!dbReady || !usersCollection || !communityIdeasCollection || !commentsCollection) {
+    if (!isDatabaseReady()) {
         throw new Error("Database unavailable");
     }
-    return { usersCollection, communityIdeasCollection, commentsCollection };
+    return {
+        usersCollection: usersCollection,
+        communityIdeasCollection: communityIdeasCollection,
+        commentsCollection: commentsCollection,
+    };
 };
+const fallbackProjects = [
+    {
+        _id: "689b5a2d8f1c4d0b1a2e3f41",
+        title: "Neighborhood Food Garden",
+        shortDescription: "A shared garden that grows fresh produce for local families.",
+        detailedDescription: "A shared garden that grows fresh produce for local families and creates a volunteer-friendly learning space.",
+        fullDescription: "A shared garden that grows fresh produce for local families and creates a volunteer-friendly learning space.",
+        category: "Environment",
+        tags: ["gardening", "food", "community"],
+        imageURL: "https://images.unsplash.com/photo-1466692476868-aef1dfb1e735?auto=format&fit=crop&w=900&q=80",
+        location: "Dhaka North",
+        supportNeeded: "Volunteers and basic gardening tools",
+        priority: "High",
+        estimatedBudget: "$1200",
+        targetAudience: "Local families and school groups",
+        problemStatement: "Fresh produce access is limited for many nearby homes.",
+        proposedSolution: "Convert a small community lot into a productive shared garden.",
+        userId: "689b5a2d8f1c4d0b1a2e3f42",
+        userName: "Aisha Rahman",
+        userEmail: "aisha@example.com",
+        createdAt: new Date("2026-01-12T10:00:00.000Z"),
+        updatedAt: new Date("2026-01-12T10:00:00.000Z"),
+        likes: 24,
+        commentCount: 6,
+    },
+    {
+        _id: "689b5a2d8f1c4d0b1a2e3f43",
+        title: "Youth Coding Workshop",
+        shortDescription: "Weekly sessions that help local teens learn practical coding skills.",
+        detailedDescription: "Weekly sessions that help local teens learn practical coding skills and build confidence through real projects.",
+        fullDescription: "Weekly sessions that help local teens learn practical coding skills and build confidence through real projects.",
+        category: "Education",
+        tags: ["education", "technology", "youth"],
+        imageURL: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=900&q=80",
+        location: "Uttara",
+        supportNeeded: "Mentors and laptops",
+        priority: "Medium",
+        estimatedBudget: "$1800",
+        targetAudience: "Teen learners",
+        problemStatement: "Many young people lack access to structured digital learning.",
+        proposedSolution: "Launch a low-cost workshop series with community mentors.",
+        userId: "689b5a2d8f1c4d0b1a2e3f44",
+        userName: "Nabil Hasan",
+        userEmail: "nabil@example.com",
+        createdAt: new Date("2026-02-03T14:30:00.000Z"),
+        updatedAt: new Date("2026-02-03T14:30:00.000Z"),
+        likes: 17,
+        commentCount: 4,
+    },
+    {
+        _id: "689b5a2d8f1c4d0b1a2e3f45",
+        title: "Community Health Checkpoint",
+        shortDescription: "A pop-up health awareness event for families in underserved areas.",
+        detailedDescription: "A pop-up health awareness event for families in underserved areas with free screenings and guidance.",
+        fullDescription: "A pop-up health awareness event for families in underserved areas with free screenings and guidance.",
+        category: "Health",
+        tags: ["health", "wellness", "outreach"],
+        imageURL: "https://images.unsplash.com/photo-1576091160550-2173dba999ef?auto=format&fit=crop&w=900&q=80",
+        location: "Banani",
+        supportNeeded: "Health volunteers and screening materials",
+        priority: "High",
+        estimatedBudget: "$2200",
+        targetAudience: "Families and older adults",
+        problemStatement: "Local residents need easier access to preventive health support.",
+        proposedSolution: "Create a mobile-style health checkpoint with local partners.",
+        userId: "689b5a2d8f1c4d0b1a2e3f46",
+        userName: "Mina Akter",
+        userEmail: "mina@example.com",
+        createdAt: new Date("2026-03-18T09:15:00.000Z"),
+        updatedAt: new Date("2026-03-18T09:15:00.000Z"),
+        likes: 31,
+        commentCount: 8,
+    },
+];
 async function initializeDatabase() {
     if (!uri) {
         console.warn("MONGODB_URI is not configured. API routes will return 503 until it is set.");
@@ -281,8 +360,11 @@ async function run() {
                 res.status(500).json({ message: "Error updating profile" });
             }
         });
-        app.get("/ideas/featured", async (req, res) => {
+        app.get("/projects/featured", async (req, res) => {
             try {
+                if (!isDatabaseReady()) {
+                    return res.json(fallbackProjects.slice(0, 3));
+                }
                 const { communityIdeasCollection } = ensureCollections();
                 const result = await communityIdeasCollection.find().limit(6).toArray();
                 res.json(result);
@@ -292,8 +374,11 @@ async function run() {
                 res.status(500).json({ message: "Error fetching featured ideas" });
             }
         });
-        app.get("/ideas", async (req, res) => {
+        app.get("/projects", async (req, res) => {
             try {
+                if (!isDatabaseReady()) {
+                    return res.json(fallbackProjects);
+                }
                 const category = typeof req.query.category === "string" ? req.query.category : undefined;
                 const search = typeof req.query.search === "string" ? req.query.search : undefined;
                 const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined;
@@ -326,8 +411,15 @@ async function run() {
                 res.status(500).json({ message: "Error fetching ideas" });
             }
         });
-        app.get("/ideas/:id", async (req, res) => {
+        app.get("/projects/:id", async (req, res) => {
             try {
+                if (!isDatabaseReady()) {
+                    const fallbackProject = fallbackProjects.find((project) => project._id === req.params.id);
+                    if (fallbackProject) {
+                        return res.json(fallbackProject);
+                    }
+                    return res.status(404).json({ message: "Idea not found" });
+                }
                 const { id } = req.params;
                 if (!mongodb_1.ObjectId.isValid(id)) {
                     return res.status(404).json({ message: "Idea not found" });
@@ -344,7 +436,7 @@ async function run() {
                 res.status(500).json({ message: "Error fetching idea" });
             }
         });
-        app.post("/ideas", verifyToken, async (req, res) => {
+        app.post("/projects", verifyToken, async (req, res) => {
             try {
                 const { title, shortDescription, detailedDescription, fullDescription, category, tags, imageURL, location, supportNeeded, priority, estimatedBudget, targetAudience, problemStatement, proposedSolution, userName, userEmail, } = req.body;
                 const normalizedFullDescription = String(fullDescription || detailedDescription || "").trim();
@@ -407,7 +499,7 @@ async function run() {
                 res.status(500).json({ message: "Error creating idea" });
             }
         });
-        app.patch("/ideas/:id", verifyToken, async (req, res) => {
+        app.patch("/projects/:id", verifyToken, async (req, res) => {
             try {
                 const { id } = req.params;
                 const updatedData = { ...req.body, updatedAt: new Date() };
@@ -429,7 +521,7 @@ async function run() {
                 res.status(500).json({ message: "Error updating idea" });
             }
         });
-        app.delete("/ideas/:id", verifyToken, async (req, res) => {
+        app.delete("/projects/:id", verifyToken, async (req, res) => {
             try {
                 const { id } = req.params;
                 const { communityIdeasCollection } = ensureCollections();
@@ -450,11 +542,14 @@ async function run() {
                 res.status(500).json({ message: "Error deleting idea" });
             }
         });
-        app.get("/user/ideas", verifyToken, async (req, res) => {
+        app.get("/user/projects", verifyToken, async (req, res) => {
             try {
                 const userId = req.user?.userId;
                 if (!userId) {
                     return res.status(401).json({ message: "Unauthorized" });
+                }
+                if (!isDatabaseReady()) {
+                    return res.json(fallbackProjects.filter((project) => project.userId === "689b5a2d8f1c4d0b1a2e3f42"));
                 }
                 const normalizedUserId = typeof userId === "string" ? userId : userId.toString();
                 const { communityIdeasCollection } = ensureCollections();
@@ -629,6 +724,13 @@ run().catch((error) => {
     if (error instanceof Error) {
         console.error(error.stack);
     }
+});
+app.get("/healthz", (req, res) => {
+    res.json({
+        status: "ok",
+        databaseReady: isDatabaseReady(),
+        runtime: process.env.VERCEL === "1" ? "vercel" : "local",
+    });
 });
 app.get("/", (req, res) => {
     res.send("Server is running fine!");
