@@ -37,3 +37,63 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+
+interface AuthUserPayload extends JwtPayload {
+  userId?: string | ObjectId;
+  email?: string;
+  name?: string;
+}
+
+interface AuthRequest<Params = Record<string, any>, ResBody = any, ReqBody = any, Query = Record<string, any>>
+  extends Request<Params, ResBody, ReqBody, Query> {
+  user?: AuthUserPayload;
+}
+
+interface UserDocument {
+  _id: ObjectId;
+  name: string;
+  email: string;
+  password: string;
+  image: string;
+  googleId?: string;
+  authMethod?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface IdeaDocument {
+  _id: ObjectId;
+  title: string;
+  shortDescription: string;
+  detailedDescription: string;
+  fullDescription?: string;
+  category: string;
+  tags: string[];
+  imageURL: string;
+  location?: string;
+  supportNeeded?: string;
+  priority?: string;
+  estimatedBudget: string;
+  targetAudience: string;
+  problemStatement: string;
+  proposedSolution: string;
+  userId: ObjectId;
+  userName: string;
+  userEmail: string;
+  createdAt: Date;
+  updatedAt: Date;
+  likes: number;
+  commentCount: number;
+}
+
+interface CommentDocument {
+  _id: ObjectId;
+  ideaId: ObjectId;
+  userId: ObjectId;
+  text: string;
+  userName?: string;
+  userEmail?: string;
+  userImage?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
