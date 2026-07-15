@@ -88,6 +88,9 @@ const client = new MongoClient(uri || "mongodb://127.0.0.1:27017", {
   // rather than waiting for the driver's much longer default selection timeout.
   serverSelectionTimeoutMS: DATABASE_CONNECT_TIMEOUT_MS,
   connectTimeoutMS: DATABASE_CONNECT_TIMEOUT_MS,
+  // Atlas IP Access rules are IPv4-based. Explicitly avoid an IPv6 DNS route
+  // from serverless runtimes, which can otherwise fail before TLS connects.
+  family: 4,
   serverApi: {
     version: ServerApiVersion.v1,
     strict: true,
@@ -397,16 +400,23 @@ async function run() {
     // its routes until the timeout has elapsed.
     void initializeDatabase();
 
-    app.use((req, res, next) => {
+    app.use(async (req, res, next) => {
       if (isDatabaseReady() || req.path === "/healthz" || req.path === "/") {
         next();
         return;
       }
 
-      // A warm serverless instance can recover after Atlas network access is
-      // fixed without requiring another deployment or process restart.
-      if (!databaseInitialization && Date.now() - lastDatabaseAttemptAt >= DATABASE_RETRY_COOLDOWN_MS) {
-        void initializeDatabase();
+      // Serverless runtimes can freeze background work when a response ends.
+      // Wait for an in-flight initial connection here, otherwise the first
+      // database request can receive a permanent-looking 503 on a cold start.
+      const shouldRetry = Date.now() - lastDatabaseAttemptAt >= DATABASE_RETRY_COOLDOWN_MS;
+      if (databaseInitialization || shouldRetry) {
+        await initializeDatabase();
+      }
+
+      if (isDatabaseReady()) {
+        next();
+        return;
       }
 
       res.status(503).json({
