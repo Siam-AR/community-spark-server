@@ -1,18 +1,14 @@
 import express, { NextFunction, Request, Response } from "express";
 import dotenv from "dotenv";
 import cors from "cors";
-import { MongoClient, ObjectId, ServerApiVersion } from "mongodb";
+import { Collection, MongoClient, ObjectId, ServerApiVersion } from "mongodb";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import bcryptjs from "bcryptjs";
 
 dotenv.config();
 
-const uri = process.env.MONGODB_URI;
-if (!uri) {
-  throw new Error("MONGODB_URI is not defined");
-}
-
-const maskedUri = uri.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@");
+const uri = process.env.MONGODB_URI || "";
+const maskedUri = uri ? uri.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@") : "<not configured>";
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
 const DB_NAME = (process.env.MONGODB_DB_NAME || "community-spark").trim();
 console.log(`MongoDB URI: ${maskedUri}`);
@@ -49,13 +45,45 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 
-const client = new MongoClient(uri, {
+const client = new MongoClient(uri || "mongodb://127.0.0.1:27017", {
   serverApi: {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
   },
 });
+
+let usersCollection: Collection<UserDocument> | undefined;
+let communityIdeasCollection: Collection<IdeaDocument> | undefined;
+let commentsCollection: Collection<CommentDocument> | undefined;
+let dbReady = false;
+
+const ensureCollections = () => {
+  if (!dbReady || !usersCollection || !communityIdeasCollection || !commentsCollection) {
+    throw new Error("Database unavailable");
+  }
+
+  return { usersCollection, communityIdeasCollection, commentsCollection };
+};
+
+async function initializeDatabase() {
+  if (!uri) {
+    console.warn("MONGODB_URI is not configured. API routes will return 503 until it is set.");
+    return;
+  }
+
+  try {
+    await client.connect();
+    const db = client.db(DB_NAME);
+    usersCollection = db.collection<UserDocument>("users");
+    communityIdeasCollection = db.collection<IdeaDocument>("community-ideas");
+    commentsCollection = db.collection<CommentDocument>("comments");
+    dbReady = true;
+    console.log(`Using MongoDB database: ${DB_NAME}`);
+  } catch (error) {
+    console.error("MongoDB connection failed:", error);
+  }
+}
 
 interface AuthUserPayload extends JwtPayload {
   userId?: string | ObjectId;
@@ -140,13 +168,7 @@ const verifyToken = async (req: AuthRequest, res: Response, next: NextFunction) 
 
 async function run() {
   try {
-    // await client.connect();
-
-    const db = client.db(DB_NAME);
-    const usersCollection = db.collection<UserDocument>("users");
-    const communityIdeasCollection = db.collection<IdeaDocument>("community-ideas");
-    const commentsCollection = db.collection<CommentDocument>("comments");
-    console.log(`Using MongoDB database: ${DB_NAME}`);
+    await initializeDatabase();
 
     app.post("/auth/register", async (req: AuthRequest<{ name?: string; email?: string; password?: string; image?: string }>, res) => {
       try {
@@ -168,6 +190,7 @@ async function run() {
           return res.status(400).json({ message: "Password must contain at least one lowercase letter" });
         }
 
+        const { usersCollection } = ensureCollections();
         const existingUser = await usersCollection.findOne({ email });
         if (existingUser) {
           return res.status(409).json({ message: "User already exists" });
@@ -211,6 +234,7 @@ async function run() {
           return res.status(400).json({ message: "Missing email or password" });
         }
 
+        const { usersCollection } = ensureCollections();
         const user = await usersCollection.findOne({ email });
         if (!user) {
           return res.status(401).json({ message: "Invalid credentials" });
@@ -247,6 +271,7 @@ async function run() {
           return res.status(400).json({ message: "Missing required fields" });
         }
 
+        const { usersCollection } = ensureCollections();
         let user = await usersCollection.findOne({ email });
 
         if (!user) {
@@ -293,6 +318,7 @@ async function run() {
         }
 
         const id = typeof userId === "string" ? userId : userId.toString();
+        const { usersCollection } = ensureCollections();
         const user = await usersCollection.findOne({ _id: new ObjectId(id) });
 
         if (!user) {
@@ -329,6 +355,7 @@ async function run() {
         if (image) updateData.image = image;
         updateData.updatedAt = new Date();
 
+        const { usersCollection } = ensureCollections();
         const result = await usersCollection.updateOne({ _id: new ObjectId(id) }, { $set: updateData });
 
         if (result.matchedCount === 0) {
@@ -344,6 +371,7 @@ async function run() {
 
     app.get("/ideas/featured", async (req, res) => {
       try {
+        const { communityIdeasCollection } = ensureCollections();
         const result = await communityIdeasCollection.find().limit(6).toArray();
         res.json(result);
       } catch (error) {
@@ -382,6 +410,7 @@ async function run() {
           filter.createdAt = dateFilter;
         }
 
+        const { communityIdeasCollection } = ensureCollections();
         const result = await communityIdeasCollection.find(filter).toArray();
         res.json(result);
       } catch (error) {
@@ -397,6 +426,7 @@ async function run() {
           return res.status(404).json({ message: "Idea not found" });
         }
 
+        const { communityIdeasCollection } = ensureCollections();
         const result = await communityIdeasCollection.findOne({ _id: new ObjectId(id) });
         if (!result) {
           return res.status(404).json({ message: "Idea not found" });
@@ -492,6 +522,7 @@ async function run() {
             commentCount: 0,
           };
 
+          const { communityIdeasCollection } = ensureCollections();
           const result = await communityIdeasCollection.insertOne(ideaData as IdeaDocument);
           res.status(201).json({ message: "Idea created successfully", id: result.insertedId });
         } catch (error) {
@@ -506,6 +537,7 @@ async function run() {
         const { id } = req.params;
         const updatedData = { ...req.body, updatedAt: new Date() };
 
+        const { communityIdeasCollection } = ensureCollections();
         const idea = await communityIdeasCollection.findOne({ _id: new ObjectId(id) });
         if (!idea) {
           return res.status(404).json({ message: "Idea not found" });
@@ -528,6 +560,7 @@ async function run() {
     app.delete("/ideas/:id", verifyToken, async (req: AuthRequest<{ id: string }>, res) => {
       try {
         const { id } = req.params;
+        const { communityIdeasCollection } = ensureCollections();
         const idea = await communityIdeasCollection.findOne({ _id: new ObjectId(id) });
         if (!idea) {
           return res.status(404).json({ message: "Idea not found" });
@@ -555,6 +588,7 @@ async function run() {
         }
 
         const normalizedUserId = typeof userId === "string" ? userId : userId.toString();
+        const { communityIdeasCollection } = ensureCollections();
         const result = await communityIdeasCollection.find({ userId: new ObjectId(normalizedUserId) }).toArray();
         res.json(result);
       } catch (error) {
@@ -577,6 +611,7 @@ async function run() {
     };
 
     const buildCommentResponse = async (comment: CommentDocument) => {
+      const { usersCollection, communityIdeasCollection } = ensureCollections();
       const user = await usersCollection.findOne(
         { _id: comment.userId },
         { projection: { name: 1, image: 1, email: 1 } },
@@ -637,6 +672,7 @@ async function run() {
           updatedAt: new Date(),
         };
 
+        const { commentsCollection, communityIdeasCollection } = ensureCollections();
         const result = await commentsCollection.insertOne(commentData as CommentDocument);
         await communityIdeasCollection.updateOne({ _id: new ObjectId(ideaId) }, { $inc: { commentCount: 1 } });
 
@@ -660,6 +696,7 @@ async function run() {
         }
 
         const normalizedUserId = typeof userId === "string" ? userId : userId.toString();
+        const { commentsCollection } = ensureCollections();
         const comments = await commentsCollection.find({ userId: new ObjectId(normalizedUserId) }).toArray();
         const response = await Promise.all(comments.map(buildCommentResponse));
         res.json(response);
@@ -672,6 +709,7 @@ async function run() {
     app.get("/comments/:ideaId", async (req: Request<{ ideaId: string }>, res) => {
       try {
         const { ideaId } = req.params;
+        const { commentsCollection } = ensureCollections();
         const comments = await commentsCollection.find({ ideaId: new ObjectId(ideaId) }).toArray();
         const response = await Promise.all(comments.map(buildCommentResponse));
         res.json(response);
@@ -684,6 +722,7 @@ async function run() {
     app.delete("/comments/:commentId", verifyToken, async (req: AuthRequest<{ commentId: string }>, res) => {
       try {
         const { commentId } = req.params;
+        const { commentsCollection } = ensureCollections();
         const comment = await commentsCollection.findOne({ _id: new ObjectId(commentId) });
         if (!comment) {
           return res.status(404).json({ message: "Comment not found" });
@@ -712,6 +751,7 @@ async function run() {
           return res.status(400).json({ message: "Missing or invalid text" });
         }
 
+        const { commentsCollection } = ensureCollections();
         const comment = await commentsCollection.findOne({ _id: new ObjectId(commentId) });
         if (!comment) {
           return res.status(404).json({ message: "Comment not found" });
