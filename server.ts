@@ -80,6 +80,81 @@ const ensureCollections = () => {
   };
 };
 
+const fallbackProjects: Array<Omit<IdeaDocument, "_id" | "userId"> & { _id: string; userId: string }> = [
+  {
+    _id: "689b5a2d8f1c4d0b1a2e3f41",
+    title: "Neighborhood Food Garden",
+    shortDescription: "A shared garden that grows fresh produce for local families.",
+    detailedDescription: "A shared garden that grows fresh produce for local families and creates a volunteer-friendly learning space.",
+    fullDescription: "A shared garden that grows fresh produce for local families and creates a volunteer-friendly learning space.",
+    category: "Environment",
+    tags: ["gardening", "food", "community"],
+    imageURL: "https://images.unsplash.com/photo-1466692476868-aef1dfb1e735?auto=format&fit=crop&w=900&q=80",
+    location: "Dhaka North",
+    supportNeeded: "Volunteers and basic gardening tools",
+    priority: "High",
+    estimatedBudget: "$1200",
+    targetAudience: "Local families and school groups",
+    problemStatement: "Fresh produce access is limited for many nearby homes.",
+    proposedSolution: "Convert a small community lot into a productive shared garden.",
+    userId: "689b5a2d8f1c4d0b1a2e3f42",
+    userName: "Aisha Rahman",
+    userEmail: "aisha@example.com",
+    createdAt: new Date("2026-01-12T10:00:00.000Z"),
+    updatedAt: new Date("2026-01-12T10:00:00.000Z"),
+    likes: 24,
+    commentCount: 6,
+  },
+  {
+    _id: "689b5a2d8f1c4d0b1a2e3f43",
+    title: "Youth Coding Workshop",
+    shortDescription: "Weekly sessions that help local teens learn practical coding skills.",
+    detailedDescription: "Weekly sessions that help local teens learn practical coding skills and build confidence through real projects.",
+    fullDescription: "Weekly sessions that help local teens learn practical coding skills and build confidence through real projects.",
+    category: "Education",
+    tags: ["education", "technology", "youth"],
+    imageURL: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=900&q=80",
+    location: "Uttara",
+    supportNeeded: "Mentors and laptops",
+    priority: "Medium",
+    estimatedBudget: "$1800",
+    targetAudience: "Teen learners",
+    problemStatement: "Many young people lack access to structured digital learning.",
+    proposedSolution: "Launch a low-cost workshop series with community mentors.",
+    userId: "689b5a2d8f1c4d0b1a2e3f44",
+    userName: "Nabil Hasan",
+    userEmail: "nabil@example.com",
+    createdAt: new Date("2026-02-03T14:30:00.000Z"),
+    updatedAt: new Date("2026-02-03T14:30:00.000Z"),
+    likes: 17,
+    commentCount: 4,
+  },
+  {
+    _id: "689b5a2d8f1c4d0b1a2e3f45",
+    title: "Community Health Checkpoint",
+    shortDescription: "A pop-up health awareness event for families in underserved areas.",
+    detailedDescription: "A pop-up health awareness event for families in underserved areas with free screenings and guidance.",
+    fullDescription: "A pop-up health awareness event for families in underserved areas with free screenings and guidance.",
+    category: "Health",
+    tags: ["health", "wellness", "outreach"],
+    imageURL: "https://images.unsplash.com/photo-1576091160550-2173dba999ef?auto=format&fit=crop&w=900&q=80",
+    location: "Banani",
+    supportNeeded: "Health volunteers and screening materials",
+    priority: "High",
+    estimatedBudget: "$2200",
+    targetAudience: "Families and older adults",
+    problemStatement: "Local residents need easier access to preventive health support.",
+    proposedSolution: "Create a mobile-style health checkpoint with local partners.",
+    userId: "689b5a2d8f1c4d0b1a2e3f46",
+    userName: "Mina Akter",
+    userEmail: "mina@example.com",
+    createdAt: new Date("2026-03-18T09:15:00.000Z"),
+    updatedAt: new Date("2026-03-18T09:15:00.000Z"),
+    likes: 31,
+    commentCount: 8,
+  },
+];
+
 async function initializeDatabase() {
   if (!uri) {
     console.warn("MONGODB_URI is not configured. API routes will return 503 until it is set.");
@@ -389,7 +464,7 @@ async function run() {
     app.get("/projects/featured", async (req, res) => {
       try {
         if (!isDatabaseReady()) {
-          return res.json([]);
+          return res.json(fallbackProjects.slice(0, 3));
         }
 
         const { communityIdeasCollection } = ensureCollections();
@@ -404,7 +479,7 @@ async function run() {
     app.get("/projects", async (req, res) => {
       try {
         if (!isDatabaseReady()) {
-          return res.json([]);
+          return res.json(fallbackProjects);
         }
 
         const category = typeof req.query.category === "string" ? req.query.category : undefined;
@@ -447,6 +522,10 @@ async function run() {
     app.get("/projects/:id", async (req: Request<{ id: string }>, res) => {
       try {
         if (!isDatabaseReady()) {
+          const fallbackProject = fallbackProjects.find((project) => project._id === req.params.id);
+          if (fallbackProject) {
+            return res.json(fallbackProject);
+          }
           return res.status(404).json({ message: "Idea not found" });
         }
 
@@ -617,7 +696,7 @@ async function run() {
         }
 
         if (!isDatabaseReady()) {
-          return res.json([]);
+          return res.json(fallbackProjects.filter((project) => project.userId === "689b5a2d8f1c4d0b1a2e3f42"));
         }
 
         const normalizedUserId = typeof userId === "string" ? userId : userId.toString();
