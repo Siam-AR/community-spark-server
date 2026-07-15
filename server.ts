@@ -21,12 +21,32 @@ const CLIENT_URLS = (process.env.CLIENT_URL || process.env.CLIENT_URLS || "")
   .map((url) => url.trim())
   .filter(Boolean);
 
+const DEFAULT_CLIENT_URLS = [
+  "https://community-spark-client-lilac.vercel.app",
+  "https://community-spark-client-git-main-siam-ars-projects.vercel.app",
+  "https://community-spark-client.vercel.app",
+];
+
+const corsOrigins = [...new Set([...CLIENT_URLS, ...DEFAULT_CLIENT_URLS])];
+
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
 
-const corsOptions = CLIENT_URLS.length > 0 ? { origin: CLIENT_URLS, credentials: true } : { origin: true, credentials: true };
+const corsOptions = {
+  origin: (requestOrigin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    if (!requestOrigin) {
+      callback(null, true);
+      return;
+    }
+
+    const isAllowedOrigin = corsOrigins.includes(requestOrigin) || requestOrigin.endsWith('.vercel.app') || requestOrigin.endsWith('localhost');
+    callback(null, isAllowedOrigin);
+  },
+  credentials: true,
+};
 
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 
 const client = new MongoClient(uri, {
