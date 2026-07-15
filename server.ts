@@ -52,7 +52,21 @@ const corsOptions = {
       return;
     }
 
-    const isAllowedOrigin = corsOrigins.includes(requestOrigin) || requestOrigin.endsWith('.vercel.app') || requestOrigin.endsWith('localhost');
+    let requestHostname = "";
+    try {
+      requestHostname = new URL(requestOrigin).hostname;
+    } catch {
+      callback(new Error("Invalid CORS origin"));
+      return;
+    }
+
+    // Next.js can move to another local port when 3000 is busy. Permit local
+    // development origins by hostname, while keeping production origins scoped.
+    const isLocalDevelopmentOrigin = requestHostname === "localhost" || requestHostname === "127.0.0.1";
+    const isAllowedOrigin =
+      corsOrigins.includes(requestOrigin) ||
+      requestHostname.endsWith(".vercel.app") ||
+      isLocalDevelopmentOrigin;
     callback(null, isAllowedOrigin);
   },
   credentials: true,
