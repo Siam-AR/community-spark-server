@@ -327,3 +327,226 @@ async function run() {
         res.status(500).json({ message: "Error updating profile" });
       }
     });
+
+    
+    
+    app.get("/ideas/featured", async (req, res) => {
+      try {
+        const result = await communityIdeasCollection.find().limit(6).toArray();
+        res.json(result);
+      } catch (error) {
+        console.error("Error fetching featured ideas:", error);
+        res.status(500).json({ message: "Error fetching featured ideas" });
+      }
+    });
+
+    app.get("/ideas", async (req, res) => {
+      try {
+        const category = typeof req.query.category === "string" ? req.query.category : undefined;
+        const search = typeof req.query.search === "string" ? req.query.search : undefined;
+        const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined;
+        const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo : undefined;
+
+        const filter: Record<string, unknown> = {};
+
+        if (category) {
+          filter.category = category;
+        }
+
+        if (search) {
+          filter.title = { $regex: search, $options: "i" };
+        }
+
+        if (dateFrom || dateTo) {
+          const dateFilter: Record<string, unknown> = {};
+          if (dateFrom) {
+            dateFilter.$gte = new Date(dateFrom);
+          }
+          if (dateTo) {
+            const endDate = new Date(dateTo);
+            endDate.setHours(23, 59, 59, 999);
+            dateFilter.$lte = endDate;
+          }
+          filter.createdAt = dateFilter;
+        }
+
+        const result = await communityIdeasCollection.find(filter).toArray();
+        res.json(result);
+      } catch (error) {
+        console.error("Error fetching ideas:", error);
+        res.status(500).json({ message: "Error fetching ideas" });
+      }
+    });
+
+    app.get("/ideas/:id", async (req: Request<{ id: string }>, res) => {
+      try {
+        const { id } = req.params;
+        if (!ObjectId.isValid(id)) {
+          return res.status(404).json({ message: "Idea not found" });
+        }
+
+        const result = await communityIdeasCollection.findOne({ _id: new ObjectId(id) });
+        if (!result) {
+          return res.status(404).json({ message: "Idea not found" });
+        }
+
+        res.json(result);
+      } catch (error) {
+        console.error("Error fetching idea:", error);
+        res.status(500).json({ message: "Error fetching idea" });
+      }
+    });
+
+    app.post(
+      "/ideas",
+      verifyToken,
+      async (
+        req: AuthRequest<{ title?: string; shortDescription?: string; detailedDescription?: string; fullDescription?: string; category?: string; tags?: string[] | string; imageURL?: string; location?: string; supportNeeded?: string; priority?: string; estimatedBudget?: string | number; targetAudience?: string; problemStatement?: string; proposedSolution?: string; userName?: string; userEmail?: string }>,
+        res,
+      ) => {
+        try {
+          const {
+            title,
+            shortDescription,
+            detailedDescription,
+            fullDescription,
+            category,
+            tags,
+            imageURL,
+            location,
+            supportNeeded,
+            priority,
+            estimatedBudget,
+            targetAudience,
+            problemStatement,
+            proposedSolution,
+            userName,
+            userEmail,
+          } = req.body;
+
+          const normalizedFullDescription = String(fullDescription || detailedDescription || "").trim();
+          const normalizedLocation = String(location || targetAudience || "").trim();
+          const normalizedSupportNeeded = String(supportNeeded || problemStatement || "").trim();
+          const normalizedPriority = String(priority || proposedSolution || "").trim();
+
+          const requiredFields = [
+            ["title", title],
+            ["shortDescription", shortDescription],
+            ["fullDescription", normalizedFullDescription],
+            ["category", category],
+            ["imageURL", imageURL],
+            ["location", normalizedLocation],
+            ["supportNeeded", normalizedSupportNeeded],
+            ["priority", normalizedPriority],
+          ] as const;
+
+          const missingField = requiredFields.find(([, value]) => !String(value || "").trim());
+          if (missingField) {
+            return res.status(400).json({ message: `Missing required field: ${missingField[0]}` });
+          }
+
+          const rawUserId = req.user?.userId;
+          const normalizedUserId = typeof rawUserId === "string" ? rawUserId : rawUserId?.toString?.();
+          if (!normalizedUserId || !ObjectId.isValid(normalizedUserId)) {
+            return res.status(401).json({ message: "Invalid user ID" });
+          }
+
+          const ideaData: Omit<IdeaDocument, "_id"> = {
+            title: title!.trim(),
+            shortDescription: shortDescription!.trim(),
+            detailedDescription: normalizedFullDescription,
+            fullDescription: normalizedFullDescription,
+            category: category!.trim(),
+            tags: Array.isArray(tags)
+              ? tags.map((tag) => String(tag).trim()).filter(Boolean)
+              : String(tags || "")
+                  .split(",")
+                  .map((tag) => tag.trim())
+                  .filter(Boolean),
+            imageURL: imageURL!.trim(),
+            location: normalizedLocation,
+            supportNeeded: normalizedSupportNeeded,
+            priority: normalizedPriority,
+            estimatedBudget: String(estimatedBudget || supportNeeded || "").trim(),
+            targetAudience: normalizedLocation,
+            problemStatement: normalizedSupportNeeded,
+            proposedSolution: normalizedPriority,
+            userId: new ObjectId(normalizedUserId),
+            userName: String(userName || req.user?.name || "Anonymous").trim() || "Anonymous",
+            userEmail: String(userEmail || req.user?.email || "").trim(),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            likes: 0,
+            commentCount: 0,
+          };
+
+          const result = await communityIdeasCollection.insertOne(ideaData as IdeaDocument);
+          res.status(201).json({ message: "Idea created successfully", id: result.insertedId });
+        } catch (error) {
+          console.error("Error creating idea:", error);
+          res.status(500).json({ message: "Error creating idea" });
+        }
+      },
+    );
+
+    app.patch("/ideas/:id", verifyToken, async (req: AuthRequest<{ id: string }, any, Partial<IdeaDocument>>, res) => {
+      try {
+        const { id } = req.params;
+        const updatedData = { ...req.body, updatedAt: new Date() };
+
+        const idea = await communityIdeasCollection.findOne({ _id: new ObjectId(id) });
+        if (!idea) {
+          return res.status(404).json({ message: "Idea not found" });
+        }
+
+        const userId = req.user?.userId;
+        const normalizedUserId = typeof userId === "string" ? userId : userId?.toString?.();
+        if (!normalizedUserId || idea.userId.toString() !== normalizedUserId) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+
+        await communityIdeasCollection.updateOne({ _id: idea._id }, { $set: updatedData });
+        res.json({ message: "Idea updated successfully" });
+      } catch (error) {
+        console.error("Error updating idea:", error);
+        res.status(500).json({ message: "Error updating idea" });
+      }
+    });
+
+    app.delete("/ideas/:id", verifyToken, async (req: AuthRequest<{ id: string }>, res) => {
+      try {
+        const { id } = req.params;
+        const idea = await communityIdeasCollection.findOne({ _id: new ObjectId(id) });
+        if (!idea) {
+          return res.status(404).json({ message: "Idea not found" });
+        }
+
+        const userId = req.user?.userId;
+        const normalizedUserId = typeof userId === "string" ? userId : userId?.toString?.();
+        if (!normalizedUserId || idea.userId.toString() !== normalizedUserId) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+
+        await communityIdeasCollection.deleteOne({ _id: idea._id });
+        res.json({ message: "Idea deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting idea:", error);
+        res.status(500).json({ message: "Error deleting idea" });
+      }
+    });
+
+    app.get("/user/ideas", verifyToken, async (req: AuthRequest, res) => {
+      try {
+        const userId = req.user?.userId;
+        if (!userId) {
+          return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        const normalizedUserId = typeof userId === "string" ? userId : userId.toString();
+        const result = await communityIdeasCollection.find({ userId: new ObjectId(normalizedUserId) }).toArray();
+        res.json(result);
+      } catch (error) {
+        console.error("Error fetching user ideas:", error);
+        res.status(500).json({ message: "Error fetching user ideas" });
+      }
+    });
