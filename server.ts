@@ -380,7 +380,7 @@ async function run() {
       }
     });
 
-    app.get("/ideas/featured", async (req, res) => {
+    app.get("/projects/featured", async (req, res) => {
       try {
         const { communityIdeasCollection } = ensureCollections();
         const result = await communityIdeasCollection.find().limit(6).toArray();
@@ -391,7 +391,7 @@ async function run() {
       }
     });
 
-    app.get("/ideas", async (req, res) => {
+    app.get("/projects", async (req, res) => {
       try {
         const category = typeof req.query.category === "string" ? req.query.category : undefined;
         const search = typeof req.query.search === "string" ? req.query.search : undefined;
@@ -430,7 +430,7 @@ async function run() {
       }
     });
 
-    app.get("/ideas/:id", async (req: Request<{ id: string }>, res) => {
+    app.get("/projects/:id", async (req: Request<{ id: string }>, res) => {
       try {
         const { id } = req.params;
         if (!ObjectId.isValid(id)) {
@@ -451,7 +451,7 @@ async function run() {
     });
 
     app.post(
-      "/ideas",
+      "/projects",
       verifyToken,
       async (
         req: AuthRequest<{ title?: string; shortDescription?: string; detailedDescription?: string; fullDescription?: string; category?: string; tags?: string[] | string; imageURL?: string; location?: string; supportNeeded?: string; priority?: string; estimatedBudget?: string | number; targetAudience?: string; problemStatement?: string; proposedSolution?: string; userName?: string; userEmail?: string }>,
@@ -543,7 +543,7 @@ async function run() {
       },
     );
 
-    app.patch("/ideas/:id", verifyToken, async (req: AuthRequest<{ id: string }, any, Partial<IdeaDocument>>, res) => {
+    app.patch("/projects/:id", verifyToken, async (req: AuthRequest<{ id: string }, any, Partial<IdeaDocument>>, res) => {
       try {
         const { id } = req.params;
         const updatedData = { ...req.body, updatedAt: new Date() };
@@ -568,7 +568,7 @@ async function run() {
       }
     });
 
-    app.delete("/ideas/:id", verifyToken, async (req: AuthRequest<{ id: string }>, res) => {
+    app.delete("/projects/:id", verifyToken, async (req: AuthRequest<{ id: string }>, res) => {
       try {
         const { id } = req.params;
         const { communityIdeasCollection } = ensureCollections();
@@ -591,7 +591,7 @@ async function run() {
       }
     });
 
-    app.get("/user/ideas", verifyToken, async (req: AuthRequest, res) => {
+    app.get("/user/projects", verifyToken, async (req: AuthRequest, res) => {
       try {
         const userId = req.user?.userId;
         if (!userId) {
