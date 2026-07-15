@@ -5,7 +5,11 @@ import { Collection, MongoClient, ObjectId, ServerApiVersion } from "mongodb";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import bcryptjs from "bcryptjs";
 
-dotenv.config({ path: process.env.VERCEL === "1" ? ".env.production" : ".env" });
+// Vercel injects its configured variables into process.env. Loading a checked-in
+// dotenv file there can hide an incomplete dashboard configuration.
+if (process.env.VERCEL !== "1") {
+  dotenv.config({ path: process.env.NODE_ENV === "production" ? ".env.production" : ".env" });
+}
 
 const uri = process.env.MONGODB_URI || "";
 const maskedUri = uri ? uri.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@") : "<not configured>";

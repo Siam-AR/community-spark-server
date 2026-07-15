@@ -9,7 +9,11 @@ const cors_1 = __importDefault(require("cors"));
 const mongodb_1 = require("mongodb");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
-dotenv_1.default.config({ path: process.env.VERCEL === "1" ? ".env.production" : ".env" });
+// Vercel injects its configured variables into process.env. Loading a checked-in
+// dotenv file there can hide an incomplete dashboard configuration.
+if (process.env.VERCEL !== "1") {
+    dotenv_1.default.config({ path: process.env.NODE_ENV === "production" ? ".env.production" : ".env" });
+}
 const uri = process.env.MONGODB_URI || "";
 const maskedUri = uri ? uri.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@") : "<not configured>";
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
